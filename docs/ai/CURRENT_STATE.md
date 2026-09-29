@@ -85,8 +85,7 @@ O painel de radar agora:
 ## 5. Próxima etapa
 
 1. validar build/deploy;
-2. refinar Radar Player com velocidades e preload;
-3. criar shell de navegação operacional;
+2. criar shell de navegação operacional;
 4. elevar o radar para elemento principal do dashboard;
 5. depois iniciar player temporal de satélite.
 
