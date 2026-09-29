@@ -135,31 +135,54 @@ async function syncAerodromes(admin: any, apiKey: string, log: (p: JsonObject) =
 }
 
 async function upsertMessages(admin: any, type: string, rows: ApiMessage[]) {
-  const payload = rows.filter((x) => text(x.mens)).map((x) => ({
-    tipo: type, localidade: x.id_localidade ?? x.id_fir ?? "BRASIL", raw: x.mens ?? "",
-    decoded: type === "METAR" ? parseMetar(x.mens ?? "") : { raw: x.mens ?? "", source: "REDEMET" },
-    observado_em: parseDate(x.validade_inicial ?? x.recebimento) ?? new Date().toISOString(),
-    fetched_at: new Date().toISOString(), valid_until: parseDate(x.validade_final)
-  }));
-  if (payload.length) {
-    const result = await admin.from("redemet_mensagens").upsert(payload, { onConflict: "localidade,tipo,observado_em" });
-    if (result.error) throw new Error("Falha ao salvar " + type + ".");
+  const byKey = new Map<string, JsonObject>();
+  for (const row of rows) {
+    const raw = text(row.mens);
+    if (!raw) continue;
+    const localidade = text(row.id_localidade) ?? text(row.id_fir) ?? "BRASIL";
+    const observado_em = parseDate(text(row.validade_inicial) ?? text(row.recebimento)) ?? new Date().toISOString();
+    const key = localidade + "|" + type + "|" + observado_em;
+    byKey.set(key, {
+      tipo: type,
+      localidade,
+      raw,
+      decoded: type === "METAR" ? parseMetar(raw) : { raw, source: "REDEMET" },
+      observado_em,
+      fetched_at: new Date().toISOString(),
+      valid_until: parseDate(text(row.validade_final))
+    });
   }
+  const payload = [...byKey.values()];
+  if (!payload.length) return 0;
+  const result = await admin.from("redemet_mensagens").upsert(payload, { onConflict: "localidade,tipo,observado_em" });
+  if (result.error) throw new Error("Falha ao salvar " + type + ": " + result.error.message);
+  return payload.length;
 }
 
 async function pollMessages(admin: any, apiKey: string, log: (p: JsonObject) => Promise<void>, deadline: number) {
-  const stations = await syncAerodromes(admin, apiKey, log, deadline), icaos = stations.map((x: any) => x.icao).join(",");
+  const stations = await syncAerodromes(admin, apiKey, log, deadline);
+  const icaos = stations.map((x: any) => x.icao).join(",");
   const calls = [
     ["METAR", "/mensagens/metar/" + icaos + "?data_ini=" + utcHour(new Date(Date.now() - 2 * 3600000)) + "&data_fim=" + utcHour(), apiKey],
     ["TAF", "/mensagens/taf/" + icaos + "?data_ini=" + utcHour(new Date(Date.now() - 12 * 3600000)) + "&data_fim=" + utcHour(), apiKey],
     ["AVISO", "/mensagens/aviso/" + icaos + "?data_ini=" + utcHour(new Date(Date.now() - 6 * 3600000)) + "&data_fim=" + utcHour(), apiKey],
     ["SIGMET", "/mensagens/sigmet?pais=Brasil&data_ini=" + utcMinute(new Date(Date.now() - 6 * 3600000)) + "&data_fim=" + utcMinute(), apiKey]
   ] as const;
-  const results = await Promise.allSettled(calls.map(([type, path, key]) => fetchRedemet(path, key, log, deadline).then((response) => ({ type, response }))));
+  const results = await Promise.allSettled(calls.map(([type, path, key]) =>
+    fetchRedemet(path, key, log, deadline).then(async (response) => {
+      const count = await upsertMessages(admin, type, nestedData(response).map((x) => objectOf(x) as ApiMessage));
+      return { type, count };
+    })
+  ));
   let successes = 0;
   for (const result of results) {
-    if (result.status === "fulfilled") { successes++; await upsertMessages(admin, result.value.type, nestedData(result.value.response).map((x) => objectOf(x) as ApiMessage)); }
-    else await log({ level: "warn", event: "step_failed", error: result.reason instanceof Error ? result.reason.message : "message poll failed" });
+    if (result.status === "fulfilled") {
+      successes++;
+      await log({ level: "info", event: "step_done", scope: "messages", path: result.value.type, status: 200, error: result.value.count + " registros salvos" });
+    } else {
+      const error = result.reason instanceof Error ? result.reason.message : "message poll failed";
+      await log({ level: "error", event: "step_failed", scope: "messages", error });
+    }
   }
   if (successes === 0) throw new Error("Todas as consultas de mensagens falharam.");
 }
