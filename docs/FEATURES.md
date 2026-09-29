@@ -34,7 +34,7 @@
 
 ### Experiência visual
 - [x] shell visual base;
-- [ ] navegação operacional;
+- [x] navegação operacional;
 - [x] sistema de animações;
 - [x] microinterações;
 - [x] skeletons;
@@ -78,3 +78,9 @@ O catálogo registra capacidades funcionais relevantes. Ajustes pequenos de CSS,
 
 - velocidades 1×/2×/4× [x]
 - preload dos frames carregados [x]
+
+
+### Dashboard operacional
+
+- radar MaxCAPPI como elemento principal [x]
+- navegação por âncoras operacionais [x]
