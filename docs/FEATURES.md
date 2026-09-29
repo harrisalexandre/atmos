@@ -72,3 +72,9 @@
 ## Regra
 
 O catálogo registra capacidades funcionais relevantes. Ajustes pequenos de CSS, build ou refatorações internas não precisam ser registrados individualmente.
+
+
+### Radar Player refinado
+
+- velocidades 1×/2×/4× [x]
+- preload dos frames carregados [x]
