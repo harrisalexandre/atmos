@@ -18,7 +18,7 @@ function objectOf(value: unknown): JsonObject {
 function text(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }
 function nestedData(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
-  const data = objectOf(objectOf(value).data).data;
+  const data = objectOf(value).data;
   return Array.isArray(data) ? data : [];
 }
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
