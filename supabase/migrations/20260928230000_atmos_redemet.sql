@@ -81,17 +81,19 @@ values
 on conflict (icao) do nothing;
 
 select cron.unschedule(jobid) from cron.job where jobname in ('atmos-redemet-messages','atmos-redemet-imagery');
-select cron.schedule('atmos-redemet-messages','*/5 * * * *',$$
+select cron.schedule('atmos-redemet-messages','*/5 * * * *',$
   select net.http_post(
     url := (select decrypted_secret from vault.decrypted_secrets where name='atmos_project_url') || '/functions/v1/redemet-poll?scope=messages',
     headers := jsonb_build_object('Content-Type','application/json','apikey',(select decrypted_secret from vault.decrypted_secrets where name='atmos_secret_key')),
-    body := '{}'::jsonb
+    body := '{}'::jsonb,
+    timeout_milliseconds := 30000
   );
-$$);
-select cron.schedule('atmos-redemet-imagery','*/10 * * * *',$$
+$);
+select cron.schedule('atmos-redemet-imagery','*/10 * * * *',$
   select net.http_post(
     url := (select decrypted_secret from vault.decrypted_secrets where name='atmos_project_url') || '/functions/v1/redemet-poll?scope=imagery',
     headers := jsonb_build_object('Content-Type','application/json','apikey',(select decrypted_secret from vault.decrypted_secrets where name='atmos_secret_key')),
-    body := '{}'::jsonb
+    body := '{}'::jsonb,
+    timeout_milliseconds := 30000
   );
-$$);
+$);
