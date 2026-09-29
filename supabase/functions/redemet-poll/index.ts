@@ -58,7 +58,7 @@ async function fetchRedemet(path: string, apiKey: string, log: (payload: JsonObj
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000), started = Date.now();
     try {
       const separator = path.includes("?") ? "&" : "?";
-      const response = await fetch(BASE + path + separator + "api_key=" + encodeURIComponent(apiKey), { signal: controller.signal, headers: { Accept: "application/json", "User-Agent": "Atmos/0.1 REDEMET monitor" } });
+      const response = await fetch(BASE + path, { signal: controller.signal, headers: { Accept: "application/json", "User-Agent": "Atmos/0.1 REDEMET monitor", "X-Api-Key": apiKey } });
       const body = await response.text(); last = response.status + " " + body.slice(0, 180);
       await log({ level: response.ok ? "info" : "warn", event: "redemet_request", path, status: response.status, attempt, duration_ms: Date.now() - started });
       if (response.ok) return objectOf(JSON.parse(body)) as RedemetEnvelope;
