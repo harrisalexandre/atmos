@@ -1,0 +1,2 @@
+[functions.redemet-poll]
+verify_jwt = false
