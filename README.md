@@ -80,3 +80,18 @@ npm run build
 ```
 
 Consulte a documentação em `docs/` antes de alterar a infraestrutura ou as integrações externas.
+## Documentação
+
+A documentação operacional e técnica do Atmos fica concentrada em `docs/`:
+
+- `docs/ai/CONTEXT.md` — contexto do produto e direção arquitetural;
+- `docs/ai/CURRENT_STATE.md` — estado atual, etapa em execução, critérios e pendências;
+- `docs/ai/ROADMAP.md` — roadmap funcional;
+- `docs/ai/ARCHITECTURE.md` — arquitetura e fluxo de dados;
+- `docs/ai/DECISIONS.md` — decisões que devem ser preservadas;
+- `docs/ai/SECURITY.md` — regras de segurança e secrets;
+- `docs/ai/BUSINESS_RULES.md` — regras funcionais meteorológicas;
+- `docs/FEATURES.md` — catálogo funcional;
+- `docs/DAILY_WORK.md` — diário de execução entre sessões.
+
+Antes de alterar o projeto, consulte principalmente `docs/ai/CURRENT_STATE.md` e `docs/ai/DECISIONS.md`. Nunca coloque credenciais ou secrets na documentação.
