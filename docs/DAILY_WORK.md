@@ -1,44 +1,40 @@
 # Atmos — Diário de trabalho
 
-## 29/09/2026 — Início da evolução para plataforma operacional
+## 29/09/2026 — Visual Engine + Radar Player inicial
 
 ### Contexto
 
-O pipeline REDEMET foi estabilizado e validado.
+O pipeline REDEMET já estava estabilizado e validado. O frontend carregava os dados corretamente, mas a interface ainda não possuía a camada de animações e microinterações planejada.
 
-O frontend voltou a carregar corretamente radar, satélite, mensagens e estações, porém a experiência visual ainda estava distante do objetivo de uma plataforma meteorológica operacional.
+### Trabalho executado
 
-### Direção definida
+- documentação consolidada em `docs/`;
+- tokens visuais adicionados ao stylesheet;
+- background atmosférico e grid ambiental;
+- tipografia operacional;
+- animações de entrada;
+- stagger dos cards;
+- pulso do LIVE;
+- refresh animado;
+- skeleton/shimmer;
+- hover/focus states;
+- transição de atualização das imagens;
+- suporte a redução de movimento;
+- Radar Player inicial com até 12 frames;
+- play/pause;
+- anterior/próximo;
+- timeline;
+- timestamp;
+- pausa ao navegar manualmente.
 
-A nova experiência será construída em etapas, com referência funcional em plataformas modernas de meteorologia:
+### Backend
 
-1. sistema visual;
-2. animações;
-3. Radar Player;
-4. dashboard;
-5. dados;
-6. satélite;
-7. nowcasting;
-8. WRF.
+Nenhuma alteração no pipeline REDEMET, cron, secrets ou RLS.
 
-### Documentação
+### Próxima etapa
 
-Criada a árvore:
-
-- `docs/FEATURES.md`;
-- `docs/DAILY_WORK.md`;
-- `docs/ai/CONTEXT.md`;
-- `docs/ai/CURRENT_STATE.md`;
-- `docs/ai/ROADMAP.md`;
-- `docs/ai/ARCHITECTURE.md`;
-- `docs/ai/DECISIONS.md`;
-- `docs/ai/SECURITY.md`.
-
-### Próximo trabalho
-
-- revisar estilos atuais;
-- criar tokens;
-- criar sistema de animações;
-- reconstruir o shell;
-- iniciar Radar Player;
-- validar sem quebrar o pipeline REDEMET.
+- validar build;
+- adicionar velocidades do radar;
+- preload dos frames;
+- criar navegação operacional;
+- evoluir o radar para o centro do dashboard.

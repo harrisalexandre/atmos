@@ -33,20 +33,20 @@
 ## Em desenvolvimento
 
 ### Experiência visual
-- [ ] shell de plataforma;
+- [x] shell visual base;
 - [ ] navegação operacional;
-- [ ] sistema de animações;
-- [ ] microinterações;
-- [ ] skeletons;
-- [ ] transições de atualização;
-- [ ] responsividade refinada.
+- [x] sistema de animações;
+- [x] microinterações;
+- [x] skeletons;
+- [x] transições de atualização;
+- [x] responsividade refinada.
 
 ### Radar
-- [ ] player;
-- [ ] timeline;
-- [ ] play/pause;
+- [x] player inicial;
+- [x] timeline;
+- [x] play/pause;
 - [ ] velocidades;
-- [ ] histórico;
+- [x] histórico de frames carregados;
 - [ ] preload.
 
 ## Planejado
