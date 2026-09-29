@@ -69,3 +69,5 @@ main{max-width:1380px;margin:auto;padding:34px 24px 70px;position:relative;z-ind
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
 
 .sync-sensor{margin-top:12px;width:100%;border:1px solid #214563;border-radius:10px;background:#0b1d2d;color:#9fc9e7;padding:9px 11px;font:500 9px "DM Mono",ui-monospace,monospace;letter-spacing:.05em;cursor:pointer;transition:background .2s,border-color .2s,transform .2s}.sync-sensor:hover:not(:disabled){background:#12304a;border-color:#3b7195;transform:translateY(-1px)}.sync-sensor:disabled{opacity:.4;cursor:not-allowed}
+
+.global-timeline{margin-top:13px;padding:10px 12px;border:1px solid #182c41;border-radius:10px;background:rgba(7,18,30,.48)}.global-timeline input{width:100%;accent-color:#69b5ff;cursor:pointer}.timeline-labels{display:flex;justify-content:space-between;margin-top:4px;font:500 8px "DM Mono",ui-monospace,monospace;color:#607991}
