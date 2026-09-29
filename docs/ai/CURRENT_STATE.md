@@ -52,7 +52,7 @@ O frontend:
 - microinterações dos cards e métricas;
 - suporte a `prefers-reduced-motion`.
 
-### Radar Player inicial implementado
+### Dashboard operacional e Radar Player
 
 O painel de radar agora:
 
@@ -66,7 +66,9 @@ O painel de radar agora:
 - faz transição visual entre frames;
 - pausa automaticamente ao navegar manualmente;
 - possui velocidades 1×, 2× e 4×;
-- faz preload dos frames carregados.
+- faz preload dos frames carregados;
+- o radar foi elevado para o topo operacional do dashboard;
+- navegação por âncoras entre Radar, Estações, Alertas e Satélite.
 
 ## 4. Critérios da Fase 1
 
@@ -87,9 +89,9 @@ O painel de radar agora:
 ## 5. Próxima etapa
 
 1. validar build/deploy;
-2. criar shell de navegação operacional;
-3. elevar o radar para elemento principal do dashboard;
-4. depois iniciar player temporal de satélite.
+1. validar build/deploy;
+2. refinamento visual do dashboard operacional;
+3. iniciar player temporal de satélite.
 
 A validação de build agora possui workflow dedicado em `.github/workflows/build-frontend.yml`; a execução ainda precisa ser confirmada pelo GitHub Actions.
 
