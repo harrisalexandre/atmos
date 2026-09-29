@@ -1,4 +1,4 @@
-import { withSupabase } from "npm:@supabase/server";
+import { withSupabase } from "npm:@supabase/server@1.8.1";
 
 type JsonObject = Record<string, unknown>;
 type Scope = "messages" | "imagery" | "all";
@@ -9,7 +9,11 @@ type AerodromeApi = { cod?: string; nome?: string; cidade?: string; lat_dec?: st
 const BASE = "https://api-redemet.decea.mil.br";
 const SANTIAGO = { lat: -29.1897, lon: -54.8667 };
 const CANDIDATES = ["SBSM", "SBNM", "SBUG", "SBPA"];
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 3;
+const ATTEMPT_TIMEOUT_MS = 8000;
+const GLOBAL_TIMEOUT_MS = 25000;
+const AERODROME_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+let aerodromeCache: { expiresAt: number; selected: Array<{ icao: string; name: string; city: string | null; latitude: number; longitude: number; distance_km: number }> } | null = null;
 
 function objectOf(value: unknown): JsonObject {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) return value as JsonObject;
@@ -32,64 +36,105 @@ function utcHour(date = new Date()): string { return date.toISOString().slice(0,
 function utcMinute(date = new Date()): string { return date.toISOString().slice(0, 16).replace(/[-T:]/g, ""); }
 function parseDate(value: string | undefined): string | null {
   if (!value) return null;
-  const d = new Date(value.replace(" ", "T") + "Z");
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(normalized) ? normalized : normalized + "Z");
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 function parseMetar(raw: string): JsonObject {
-  const tokens = raw.replace("=", "").trim().split(/\s+/), out: JsonObject = { raw };
-  const wind = tokens.find((x) => /^\d{3}\d{2,3}KT$/.test(x) || /^VRB\d{2,3}KT$/.test(x));
+  const clean = raw.replace(/=$/, "").trim();
+  const tokens = clean.split(/\s+/);
+  const cut = tokens.findIndex((x) => x === "TEMPO" || x === "BECMG" || x === "RMK");
+  const main = cut >= 0 ? tokens.slice(0, cut) : tokens;
+  const out: JsonObject = { raw };
+  const wind = main.find((x) => /^\d{3}\d{2,3}(?:G\d{2,3})?KT$/.test(x) || /^VRB\d{2,3}(?:G\d{2,3})?KT$/.test(x));
   if (wind) {
-    out.wind = wind; out.wind_direction = wind.slice(0, 3); out.wind_speed_kt = Number(wind.match(/(\d{2,3})KT/)?.[1] ?? 0);
-    const gust = wind.match(/G(\d{2,3})KT/); if (gust) out.wind_gust_kt = Number(gust[1]);
+    out.wind = wind;
+    out.wind_direction = wind.startsWith("VRB") ? "VRB" : wind.slice(0, 3);
+    const speed = wind.match(/^(?:\d{3}|VRB)(\d{2,3})KT/)?.[1];
+    const gust = wind.match(/G(\d{2,3})KT/)?.[1];
+    if (speed) out.wind_speed_kt = Number(speed);
+    if (gust) out.wind_gust_kt = Number(gust);
   }
-  const vis = tokens.find((x) => /^\d{4}$/.test(x) || /^\d{4}[NESW]{1,2}$/.test(x)); if (vis) out.visibility = vis;
-  const cloud = tokens.filter((x) => /^(FEW|SCT|BKN|OVC|VV)\d{3}$/.test(x)); out.clouds = cloud;
-  const ceiling = cloud.filter((x) => x.startsWith("BKN") || x.startsWith("OVC") || x.startsWith("VV")).map((x) => Number(x.slice(3)) * 100);
-  if (ceiling.length) out.ceiling_ft = Math.min(...ceiling);
-  const td = tokens.find((x) => /^M?\d{2}\/M?\d{2}$/.test(x));
-  if (td) { const [v, d] = td.split("/"); out.temperature_c = v.startsWith("M") ? -Number(v.slice(1)) : Number(v); out.dewpoint_c = d.startsWith("M") ? -Number(d.slice(1)) : Number(d); }
-  const q = tokens.find((x) => /^Q\d{4}$/.test(x)); if (q) out.qnh_hpa = Number(q.slice(1));
-  out.cavok = tokens.includes("CAVOK"); out.thunderstorm = tokens.some((x) => x.includes("TS")); out.precipitation = tokens.filter((x) => /^(?:[-+]?)(RA|SN|DZ|GR|GS|SH)/.test(x));
+  if (main.includes("CAVOK")) {
+    out.cavok = true;
+    out.visibility = "9999";
+    out.vis_m = 10000;
+  } else {
+    const vis = main.find((x) => /^\d{4}$/.test(x) || /^\d{4}[NESW]{1,2}$/.test(x));
+    if (vis) {
+      out.visibility = vis;
+      const digits = Number(vis.slice(0, 4));
+      out.vis_m = Number.isFinite(digits) ? digits : undefined;
+    }
+  }
+  const cloud = main.filter((x) => /^(FEW|SCT|BKN|OVC|VV|NSC)\d{3}$/.test(x) || /^(FEW|SCT|BKN|OVC|VV)\d{3}(CB|TCU)$/.test(x));
+  out.clouds = cloud;
+  const significant = main.filter((x) => /^(?:[-+]?)(?:TS|SH|RA|SN|DZ|GR|GS|FG|BR|HZ)/.test(x));
+  out.precipitation = significant;
+  out.thunderstorm = main.some((x) => x.includes("TS"));
+  out.cb = main.some((x) => x.includes("CB"));
+  out.tcu = main.some((x) => x.includes("TCU"));
+  const ceilings = cloud.filter((x) => /^(BKN|OVC|VV)\d{3}/.test(x)).map((x) => Number(x.slice(3, 6)) * 100).filter(Number.isFinite);
+  if (ceilings.length) out.ceiling_ft = Math.min(...ceilings);
+  const td = main.find((x) => /^M?\d{2}\/M?\d{2}$/.test(x));
+  if (td) {
+    const [v, d] = td.split("/");
+    out.temperature_c = v.startsWith("M") ? -Number(v.slice(1)) : Number(v);
+    out.dewpoint_c = d.startsWith("M") ? -Number(d.slice(1)) : Number(d);
+  }
+  const q = main.find((x) => /^Q\d{4}$/.test(x));
+  if (q) out.qnh_hpa = Number(q.slice(1));
+  const flightVisibility = Number(out.vis_m);
+  const ceiling = Number(out.ceiling_ft);
+  out.flight_category = Number.isFinite(flightVisibility) && flightVisibility < 1600 || Number.isFinite(ceiling) && ceiling < 500 ? "LIFR"
+    : Number.isFinite(flightVisibility) && flightVisibility < 5000 || Number.isFinite(ceiling) && ceiling < 1000 ? "IFR"
+    : Number.isFinite(flightVisibility) && flightVisibility < 8000 || Number.isFinite(ceiling) && ceiling < 3000 ? "MVFR"
+    : "VFR";
   return out;
 }
 async function sleep(ms: number): Promise<void> { await new Promise<void>((resolve) => setTimeout(resolve, ms)); }
 
-async function fetchRedemet(path: string, apiKey: string, log: (payload: JsonObject) => Promise<void>): Promise<RedemetEnvelope> {
+async function fetchRedemet(path: string, apiKey: string, log: (payload: JsonObject) => Promise<void>, deadline: number): Promise<RedemetEnvelope> {
   let last = "unknown";
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000), started = Date.now();
+  for (let attempt = 1; attempt <= MAX_RETRIES && Date.now() < deadline; attempt++) {
+    const remaining = Math.max(1, deadline - Date.now());
+    const timeoutMs = Math.min(ATTEMPT_TIMEOUT_MS, remaining);
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs), started = Date.now();
     try {
-      const separator = path.includes("?") ? "&" : "?";
+      await log({ level: "info", event: "step_start", path, attempt });
       const response = await fetch(BASE + path, { signal: controller.signal, headers: { Accept: "application/json", "User-Agent": "Atmos/0.1 REDEMET monitor", "X-Api-Key": apiKey } });
       const body = await response.text(); last = response.status + " " + body.slice(0, 180);
-      await log({ level: response.ok ? "info" : "warn", event: "redemet_request", path, status: response.status, attempt, duration_ms: Date.now() - started });
+      await log({ level: response.ok ? "info" : "warn", event: "step_done", path, status: response.status, attempt, duration_ms: Date.now() - started });
       if (response.ok) return objectOf(JSON.parse(body)) as RedemetEnvelope;
       if (response.status !== 429 && response.status < 500) break;
     } catch (error: unknown) {
       last = error instanceof Error ? error.message : "request failed";
-      await log({ level: "warn", event: "redemet_request_error", path, attempt, error: last, duration_ms: Date.now() - started });
+      await log({ level: "warn", event: "step_failed", path, attempt, error: last, duration_ms: Date.now() - started });
     } finally { clearTimeout(timer); }
-    if (attempt < MAX_RETRIES) await sleep(Math.min(1000 * 2 ** (attempt - 1), 16000));
+    if (attempt < MAX_RETRIES && Date.now() < deadline) await sleep(Math.min(1000 * 2 ** (attempt - 1), Math.max(0, deadline - Date.now())));
   }
   throw new Error("REDEMET request failed after " + MAX_RETRIES + " attempts: " + last);
 }
 
-async function syncAerodromes(admin: { from: (table: string) => { upsert: (value: JsonObject[], options: JsonObject) => Promise<{ error: unknown }> } }, apiKey: string, log: (p: JsonObject) => Promise<void>) {
-  const response = await fetchRedemet("/aerodromos/?pais=Brasil", apiKey, log);
+async function syncAerodromes(admin: any, apiKey: string, log: (p: JsonObject) => Promise<void>, deadline: number) {
+  if (aerodromeCache && aerodromeCache.expiresAt > Date.now()) return aerodromeCache.selected;
+  const response = await fetchRedemet("/aerodromos/?pais=Brasil", apiKey, log, deadline);
   const candidates = nestedData(response).map(objectOf).filter((x) => CANDIDATES.includes(text(x.cod) ?? ""));
   const ranked = candidates.map((x: AerodromeApi) => {
     const lat = Number(x.lat_dec), lon = Number(x.lon_dec);
     return { icao: text(x.cod) ?? "", name: text(x.nome) ?? "", city: text(x.cidade) ?? null, latitude: lat, longitude: lon, distance_km: haversineKm(SANTIAGO.lat, SANTIAGO.lon, lat, lon) };
   }).filter((x) => Number.isFinite(x.distance_km)).sort((a, b) => a.distance_km - b.distance_km);
   if (!ranked.length) throw new Error("Nenhum aeródromo candidato foi validado pela REDEMET.");
-  const selected = ranked.slice(0, 3).map((x, i) => ({ ...x, role: i === 0 ? "principal" : "apoio", enabled: true, validated_at: new Date().toISOString() }));
-  const disabled = CANDIDATES.filter((icao) => !selected.some((x) => x.icao === icao)).map((icao) => ({ icao, enabled: false, validated_at: new Date().toISOString() }));
-  const result = await admin.from("redemet_aerodromos").upsert([...selected, ...disabled], { onConflict: "icao" });
-  if (result.error) throw new Error("Falha ao salvar aeródromos.");
+  const selected = ranked.slice(0, 3);
+  await admin.from("redemet_aerodromos").upsert([
+    ...selected.map((x, i) => ({ ...x, role: i === 0 ? "principal" : "apoio", enabled: true, validated_at: new Date().toISOString() })),
+    ...CANDIDATES.filter((icao) => !selected.some((x) => x.icao === icao)).map((icao) => ({ icao, enabled: false, validated_at: new Date().toISOString() }))
+  ], { onConflict: "icao" });
+  aerodromeCache = { expiresAt: Date.now() + AERODROME_CACHE_TTL_MS, selected };
   return selected;
 }
 
-async function upsertMessages(admin: { from: (table: string) => { upsert: (value: JsonObject[], options: JsonObject) => Promise<{ error: unknown }> } }, type: string, rows: ApiMessage[]) {
+async function upsertMessages(admin: any, type: string, rows: ApiMessage[]) {
   const payload = rows.filter((x) => text(x.mens)).map((x) => ({
     tipo: type, localidade: x.id_localidade ?? x.id_fir ?? "BRASIL", raw: x.mens ?? "",
     decoded: type === "METAR" ? parseMetar(x.mens ?? "") : { raw: x.mens ?? "", source: "REDEMET" },
@@ -102,52 +147,93 @@ async function upsertMessages(admin: { from: (table: string) => { upsert: (value
   }
 }
 
-async function pollMessages(admin: { from: (table: string) => { upsert: (value: JsonObject[], options: JsonObject) => Promise<{ error: unknown }> } }, apiKey: string, log: (p: JsonObject) => Promise<void>) {
-  const stations = await syncAerodromes(admin, apiKey, log), icaos = stations.map((x) => x.icao).join(",");
-  const [metar, taf, avisos, sigmet] = await Promise.all([
-    fetchRedemet("/mensagens/metar/" + icaos + "?data_ini=" + utcHour(new Date(Date.now() - 2 * 3600000)) + "&data_fim=" + utcHour(), apiKey, log),
-    fetchRedemet("/mensagens/taf/" + icaos + "?data_ini=" + utcHour(new Date(Date.now() - 12 * 3600000)) + "&data_fim=" + utcHour(), apiKey, log),
-    fetchRedemet("/mensagens/aviso/" + icaos + "?data_ini=" + utcHour(new Date(Date.now() - 6 * 3600000)) + "&data_fim=" + utcHour(), apiKey, log),
-    fetchRedemet("/mensagens/sigmet?pais=Brasil&data_ini=" + utcMinute(new Date(Date.now() - 6 * 3600000)) + "&data_fim=" + utcMinute(), apiKey, log)
+async function pollMessages(admin: any, apiKey: string, log: (p: JsonObject) => Promise<void>, deadline: number) {
+  const stations = await syncAerodromes(admin, apiKey, log, deadline), icaos = stations.map((x: any) => x.icao).join(",");
+  const calls = [
+    ["METAR", "/mensagens/metar/" + icaos + "?data_ini=" + utcHour(new Date(Date.now() - 2 * 3600000)) + "&data_fim=" + utcHour(), apiKey],
+    ["TAF", "/mensagens/taf/" + icaos + "?data_ini=" + utcHour(new Date(Date.now() - 12 * 3600000)) + "&data_fim=" + utcHour(), apiKey],
+    ["AVISO", "/mensagens/aviso/" + icaos + "?data_ini=" + utcHour(new Date(Date.now() - 6 * 3600000)) + "&data_fim=" + utcHour(), apiKey],
+    ["SIGMET", "/mensagens/sigmet?pais=Brasil&data_ini=" + utcMinute(new Date(Date.now() - 6 * 3600000)) + "&data_fim=" + utcMinute(), apiKey]
+  ] as const;
+  const results = await Promise.allSettled(calls.map(([type, path, key]) => fetchRedemet(path, key, log, deadline).then((response) => ({ type, response }))));
+  let successes = 0;
+  for (const result of results) {
+    if (result.status === "fulfilled") { successes++; await upsertMessages(admin, result.value.type, nestedData(result.value.response).map((x) => objectOf(x) as ApiMessage)); }
+    else await log({ level: "warn", event: "step_failed", error: result.reason instanceof Error ? result.reason.message : "message poll failed" });
+  }
+  if (successes === 0) throw new Error("Todas as consultas de mensagens falharam.");
+}
+
+async function pollImagery(admin: any, apiKey: string, log: (p: JsonObject) => Promise<void>, deadline: number) {
+  const results = await Promise.allSettled([
+    fetchRedemet("/produtos/radar/maxcappi?area=sg", apiKey, log, deadline),
+    fetchRedemet("/produtos/satelite/realcada", apiKey, log, deadline)
   ]);
-  for (const [type, response] of [["METAR", metar], ["TAF", taf], ["AVISO", avisos], ["SIGMET", sigmet]] as const) await upsertMessages(admin, type, nestedData(response).map((x) => objectOf(x) as ApiMessage));
+  let successes = 0;
+  for (const result of results) {
+    if (result.status === "rejected") { await log({ level: "warn", event: "step_failed", error: result.reason instanceof Error ? result.reason.message : "imagery poll failed" }); continue; }
+    successes++;
+    const data = objectOf(result.value.data);
+    if (Array.isArray(data.radar)) {
+      const radarItems = data.radar.flatMap((item) => Array.isArray(item) ? item : [item]).map(objectOf).filter((x) => text(x.localidade)?.toLowerCase() === "sg" && text(x.path));
+      const latest = radarItems.sort((a, b) => String(b.data ?? "").localeCompare(String(a.data ?? "")))[0];
+      if (latest) {
+        const save = await admin.from("redemet_radar").upsert([{ area: "sg", tipo: "maxcappi", frame_url: text(latest.path)!, frame_timestamp: parseDate(text(latest.data)) ?? new Date().toISOString(), fetched_at: new Date().toISOString() }], { onConflict: "area,tipo,frame_timestamp" });
+        if (save.error) await log({ level: "error", event: "step_failed", error: "Falha ao salvar radar: " + save.error.message });
+      }
+    }
+    if (Array.isArray(data.satelite)) {
+      const satItems = data.satelite.map(objectOf).filter((x) => text(x.path));
+      const latest = satItems.sort((a, b) => String(b.data ?? "").localeCompare(String(a.data ?? "")))[0];
+      if (latest) {
+        const save = await admin.from("redemet_radar").upsert([{ area: "brasil", tipo: "satelite-realcada", frame_url: text(latest.path)!, frame_timestamp: parseDate(text(latest.data)) ?? new Date().toISOString(), fetched_at: new Date().toISOString() }], { onConflict: "area,tipo,frame_timestamp" });
+        if (save.error) await log({ level: "error", event: "step_failed", error: "Falha ao salvar satélite: " + save.error.message });
+      }
+    }
+  }
+  if (successes === 0) throw new Error("Radar e satélite falharam.");
 }
 
-async function pollImagery(admin: { from: (table: string) => { upsert: (value: JsonObject[], options: JsonObject) => Promise<{ error: unknown }> } }, apiKey: string, log: (p: JsonObject) => Promise<void>) {
-  const [radar, sat] = await Promise.all([fetchRedemet("/produtos/radar/maxcappi?area=sg", apiKey, log), fetchRedemet("/produtos/satelite/realcada", apiKey, log)]);
-  const radarData = objectOf(radar.data);
-  const radarRaw = Array.isArray(radarData.radar) ? radarData.radar : [];
-  const radarItems = radarRaw
-    .flatMap((item) => Array.isArray(item) ? item : [item])
-    .map(objectOf)
-    .filter((x) => text(x.localidade)?.toLowerCase() === "sg" && text(x.path));
-  const latest = radarItems.sort((a, b) => String(b.data ?? "").localeCompare(String(a.data ?? "")))[0];
-  if (latest) {
-    const result = await admin.from("redemet_radar").upsert([{ area: "sg", tipo: "maxcappi", frame_url: text(latest.path) ?? "", frame_timestamp: parseDate(text(latest.data)) ?? new Date().toISOString(), fetched_at: new Date().toISOString() }], { onConflict: "area,tipo,frame_timestamp" });
-    if (result.error) throw new Error("Falha ao salvar radar.");
-  }
-  const satData = objectOf(sat.data), satItems = (Array.isArray(satData.satelite) ? satData.satelite : []).map(objectOf).filter((x) => text(x.path));
-  const satLatest = satItems.sort((a, b) => String(b.data ?? "").localeCompare(String(a.data ?? "")))[0];
-  if (satLatest) {
-    const result = await admin.from("redemet_radar").upsert([{ area: "brasil", tipo: "satelite-realcada", frame_url: text(satLatest.path) ?? "", frame_timestamp: parseDate(text(satLatest.data)) ?? new Date().toISOString(), fetched_at: new Date().toISOString() }], { onConflict: "area,tipo,frame_timestamp" });
-    if (result.error) throw new Error("Falha ao salvar satélite.");
-  }
-}
-
-export default withSupabase({ auth: "secret" }, async (req, ctx) => {
-  const started = Date.now(), apiKey = Deno.env.get("REDEMET_API_KEY");
+const handler = withSupabase({ auth: "secret" }, async (req, ctx) => {
+  const url = new URL(req.url);
+  if (url.searchParams.get("scope") === "ping") return Response.json({ ok: true, ping: true, has_key: Boolean(Deno.env.get("REDEMET_API_KEY")) });
+  const started = Date.now(), deadline = started + GLOBAL_TIMEOUT_MS, apiKey = Deno.env.get("REDEMET_API_KEY");
   if (!apiKey) return Response.json({ ok: false, error: "REDEMET_API_KEY não configurada." }, { status: 500 });
-  const scopeRaw = new URL(req.url).searchParams.get("scope") ?? "all";
+  const scopeRaw = url.searchParams.get("scope") ?? "all";
   const scope: Scope = scopeRaw === "messages" || scopeRaw === "imagery" || scopeRaw === "all" ? scopeRaw : "all";
-  const log = async (payload: JsonObject): Promise<void> => { try { await ctx.supabaseAdmin.from("redemet_logs").insert(payload); } catch { /* observability must not break polling */ } };
-  try {
-    if (scope === "messages" || scope === "all") await pollMessages(ctx.supabaseAdmin, apiKey, log);
-    if (scope === "imagery" || scope === "all") await pollImagery(ctx.supabaseAdmin, apiKey, log);
-    await log({ level: "info", event: "poll_success", scope, duration_ms: Date.now() - started });
-    return Response.json({ ok: true, scope });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "poll failed";
-    await log({ level: "error", event: "poll_failed", scope, error: message, duration_ms: Date.now() - started });
-    return Response.json({ ok: false, error: message }, { status: 502 });
+  const log = async (payload: JsonObject): Promise<void> => {
+    try {
+      const { error } = await ctx.supabaseAdmin.from("redemet_logs").insert(payload);
+      if (error) console.error("redemet_logs insert failed", error);
+    } catch (error) { console.error("redemet_logs insert exception", error); }
+  };
+  const work = (async () => {
+    await log({ level: "info", event: "poll_start", scope });
+    try {
+      const steps: Promise<unknown>[] = [];
+      if (scope === "messages" || scope === "all") steps.push(pollMessages(ctx.supabaseAdmin, apiKey, log, deadline));
+      if (scope === "imagery" || scope === "all") steps.push(pollImagery(ctx.supabaseAdmin, apiKey, log, deadline));
+      const results = await Promise.allSettled(steps);
+      const okCount = results.filter((x) => x.status === "fulfilled").length;
+      if (okCount === 0) throw new Error("Todas as etapas do poll falharam.");
+      await log({ level: "info", event: "poll_success", scope, duration_ms: Date.now() - started });
+      return { ok: true, scope };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "poll failed";
+      await log({ level: "error", event: "poll_failed", scope, error: message, duration_ms: Date.now() - started });
+      throw error;
+    }
+  })();
+
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (url.searchParams.get("wait") !== "1" && runtime?.waitUntil) {
+    runtime.waitUntil(work);
+    return Response.json({ ok: true, accepted: true }, { status: 202 });
+  }
+  try { return Response.json(await work); }
+  catch (error: unknown) {
+    return Response.json({ ok: false, error: error instanceof Error ? error.message : "poll failed" }, { status: 502 });
   }
 });
+
+export default { fetch: handler };
