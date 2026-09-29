@@ -9,7 +9,7 @@ type AerodromeApi = { cod?: string; nome?: string; cidade?: string; lat_dec?: st
 const BASE = "https://api-redemet.decea.mil.br";
 const SANTIAGO = { lat: -29.1897, lon: -54.8667 };
 const CANDIDATES = ["SBSM", "SBNM", "SBUG", "SBPA"];
-const MAX_RETRIES = 5;
+const MAX_RETRIES = 2;
 
 function objectOf(value: unknown): JsonObject {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) return value as JsonObject;
@@ -57,7 +57,7 @@ async function sleep(ms: number): Promise<void> { await new Promise<void>((resol
 async function fetchRedemet(path: string, apiKey: string, log: (payload: JsonObject) => Promise<void>): Promise<RedemetEnvelope> {
   let last = "unknown";
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000), started = Date.now();
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000), started = Date.now();
     try {
       const separator = path.includes("?") ? "&" : "?";
       const response = await fetch(BASE + path, { signal: controller.signal, headers: { Accept: "application/json", "User-Agent": "Atmos/0.1 REDEMET monitor", "X-Api-Key": apiKey } });
