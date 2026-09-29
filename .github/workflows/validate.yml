@@ -1,4 +1,4 @@
-name: Validate Atmos
+name: Validate and Deploy Atmos
 
 on:
   push:
@@ -19,3 +19,23 @@ jobs:
       - run: npm install
       - run: npm run lint
       - run: npm run build
+      - name: Upload Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    if: github.event_name == 'push'
+    needs: frontend
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
