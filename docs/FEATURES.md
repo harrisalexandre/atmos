@@ -45,9 +45,9 @@
 - [x] player inicial;
 - [x] timeline;
 - [x] play/pause;
-- [ ] velocidades;
+- [x] velocidades 1×/2×/4×;
 - [x] histórico de frames carregados;
-- [ ] preload.
+- [x] preload dos frames carregados;
 
 ## Planejado
 
