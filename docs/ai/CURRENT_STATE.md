@@ -64,7 +64,9 @@ O painel de radar agora:
 - exibe posição atual;
 - exibe timestamp;
 - faz transição visual entre frames;
-- pausa automaticamente ao navegar manualmente.
+- pausa automaticamente ao navegar manualmente;
+- possui velocidades 1×, 2× e 4×;
+- faz preload dos frames carregados.
 
 ## 4. Critérios da Fase 1
 
@@ -86,8 +88,10 @@ O painel de radar agora:
 
 1. validar build/deploy;
 2. criar shell de navegação operacional;
-4. elevar o radar para elemento principal do dashboard;
-5. depois iniciar player temporal de satélite.
+3. elevar o radar para elemento principal do dashboard;
+4. depois iniciar player temporal de satélite.
+
+A validação de build agora possui workflow dedicado em `.github/workflows/build-frontend.yml`; a execução ainda precisa ser confirmada pelo GitHub Actions.
 
 ## 6. Regra de segurança
 
