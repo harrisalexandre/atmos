@@ -19,7 +19,9 @@ function text(value: unknown): string | undefined { return typeof value === "str
 function nestedData(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   const data = objectOf(value).data;
-  return Array.isArray(data) ? data : [];
+  if (Array.isArray(data)) return data;
+  const paged = objectOf(data).data;
+  return Array.isArray(paged) ? paged : [];
 }
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const r = 6371, p = Math.PI / 180;
