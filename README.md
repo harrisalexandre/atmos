@@ -28,6 +28,8 @@ A função valida via endpoint oficial /aerodromos os candidatos SBSM, SBNM, SBU
 
 A chave da REDEMET nunca deve entrar no client, no Git ou em variáveis VITE_*.
 
+> Deploy: alterações na `main` acionam o GitHub Actions para reconstruir e publicar o frontend no GitHub Pages.
+
 ## Desenvolvimento
 
 npm install
