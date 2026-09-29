@@ -115,7 +115,12 @@ async function pollMessages(admin: { from: (table: string) => { upsert: (value: 
 
 async function pollImagery(admin: { from: (table: string) => { upsert: (value: JsonObject[], options: JsonObject) => Promise<{ error: unknown }> } }, apiKey: string, log: (p: JsonObject) => Promise<void>) {
   const [radar, sat] = await Promise.all([fetchRedemet("/produtos/radar/maxcappi?area=sg", apiKey, log), fetchRedemet("/produtos/satelite/realcada", apiKey, log)]);
-  const radarData = objectOf(radar.data), radarItems = (Array.isArray(radarData.radar) ? radarData.radar : []).flatMap((x) => Array.isArray(x) ? x.map(objectOf) : []).filter((x) => text(x.localidade) === "sg" && text(x.path));
+  const radarData = objectOf(radar.data);
+  const radarRaw = Array.isArray(radarData.radar) ? radarData.radar : [];
+  const radarItems = radarRaw
+    .flatMap((item) => Array.isArray(item) ? item : [item])
+    .map(objectOf)
+    .filter((x) => text(x.localidade)?.toLowerCase() === "sg" && text(x.path));
   const latest = radarItems.sort((a, b) => String(b.data ?? "").localeCompare(String(a.data ?? "")))[0];
   if (latest) {
     const result = await admin.from("redemet_radar").upsert([{ area: "sg", tipo: "maxcappi", frame_url: text(latest.path) ?? "", frame_timestamp: parseDate(text(latest.data)) ?? new Date().toISOString(), fetched_at: new Date().toISOString() }], { onConflict: "area,tipo,frame_timestamp" });
